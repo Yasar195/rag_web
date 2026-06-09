@@ -90,15 +90,29 @@
 
 <div class="w-full max-w-[420px] mx-auto p-8">
 	<div class="flex items-center gap-3 mb-8">
-		<svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-			<rect width="32" height="32" rx="8" fill="#1f2937" />
-			<path
-				d="M16 8L10 12V20C10 22.2 11.8 24 14 24H18C20.2 24 22 22.2 22 20V12L16 8Z"
-				fill="white"
-			/>
-			<circle cx="16" cy="16" r="2" fill="#1f2937" />
+		<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+			<rect width="32" height="32" rx="8" fill="url(#logoGradient)" />
+			<defs>
+				<linearGradient id="logoGradient" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+					<stop stop-color="#8b5cf6" />
+					<stop offset="1" stop-color="#3b82f6" />
+				</linearGradient>
+			</defs>
+			<!-- Brain/Chip node icon -->
+			<circle cx="16" cy="16" r="6" stroke="white" stroke-width="2" />
+			<circle cx="16" cy="16" r="2" fill="white" />
+			<!-- Connecting nodes -->
+			<circle cx="16" cy="6" r="1.5" fill="white" />
+			<circle cx="16" cy="26" r="1.5" fill="white" />
+			<circle cx="6" cy="16" r="1.5" fill="white" />
+			<circle cx="26" cy="16" r="1.5" fill="white" />
+			<!-- Lines -->
+			<line x1="16" y1="7.5" x2="16" y2="10" stroke="white" stroke-width="1.5" />
+			<line x1="16" y1="22" x2="16" y2="24.5" stroke="white" stroke-width="1.5" />
+			<line x1="7.5" y1="16" x2="10" y2="16" stroke="white" stroke-width="1.5" />
+			<line x1="22" y1="16" x2="24.5" y2="16" stroke="white" stroke-width="1.5" />
 		</svg>
-		<span class="text-xl font-semibold text-gray-800">SmartSave</span>
+		<span class="text-xl font-semibold text-gray-800">Memorise</span>
 	</div>
 
 	<h1 class="text-3xl font-bold text-gray-800 mb-2">Welcome Back</h1>
@@ -200,7 +214,7 @@
 
 		<button
 			type="submit"
-			class="w-full py-3.5 bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-lg text-base font-semibold transition-all hover:shadow-lg hover:shadow-blue-600/30 hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-6"
+			class="w-full py-3.5 bg-gradient-to-br from-purple-600 to-indigo-600 text-white rounded-lg text-base font-semibold transition-all hover:shadow-lg hover:shadow-purple-600/30 hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-6"
 			disabled={authState.loading}
 		>
 			{#if authState.loading}
@@ -215,8 +229,6 @@
 	</form>
 
 	<p class="mt-8 text-xs text-gray-400 leading-relaxed text-center">
-		Join the millions of smart investors who trust us to manage their
-		finances. Log in to access your personalized dashboard, track your
-		portfolio performance, and make informed investment decisions.
+		Join the creators building personalized AI agents. Log in to your Memorise account to implement, manage, and interact with chatbots backed by their own custom memory.
 	</p>
 </div>

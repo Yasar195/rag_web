@@ -103,6 +103,34 @@ class AuthState {
 				});
 				// Refresh local state user profile
 				this.#user = auth.currentUser;
+
+				// Fetch Firebase ID Token
+				const token = await userCredential.user.getIdToken();
+
+				// Send registration request to backend
+				const backendUrl = env.PUBLIC_BACKEND_URL;
+				if (backendUrl) {
+					const registerUrl = `${backendUrl}/users/register`;
+					const response = await fetch(registerUrl, {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							"Authorization": `Bearer ${token}`
+						},
+						body: JSON.stringify({
+							id: userCredential.user.uid,
+							email: email,
+							name: name
+						})
+					});
+
+					if (!response.ok) {
+						const errorText = await response.text();
+						throw new Error(errorText || `Registration failed with status ${response.status}`);
+					}
+				} else {
+					console.warn("PUBLIC_BACKEND_URL is not set.");
+				}
 			}
 		} catch (err: any) {
 			this.#error = this.cleanErrorMessage(err.code || err.message);
