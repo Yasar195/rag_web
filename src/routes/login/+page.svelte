@@ -31,7 +31,7 @@
 		<div class="m-auto w-full py-8 md:py-12">
 			<LoginForm onSubmit={handleLoginSubmit} />
 		</div>
-	</div>
+		</div>
 
 	<div class="w-full md:flex-1 bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 flex items-center justify-center p-8 min-h-[320px] md:h-full relative overflow-hidden">
 		<!-- Graphic element background decorative circles -->
