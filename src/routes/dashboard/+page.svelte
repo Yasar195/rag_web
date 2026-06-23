@@ -31,6 +31,14 @@
 	let memoryError = $state<string | null>(null);
 	let memorySuccess = $state(false);
 
+	// Bot update states
+	let editBotName = $state("");
+	let editBotDescription = $state("");
+	let editBotSystemPrompt = $state("");
+	let updatingBot = $state(false);
+	let updateBotError = $state<string | null>(null);
+	let updateBotSuccess = $state(false);
+
 	// Handle redirect if not authenticated
 	$effect(() => {
 		if (!authState.loading && !authState.user) {
@@ -198,6 +206,59 @@
 			memoryError = err.message || "Failed to add memory. Please try again.";
 		} finally {
 			addingMemory = false;
+		}
+	}
+
+	async function handleUpdateBot() {
+		if (!activeConfigureBot) return;
+		if (!editBotName.trim()) {
+			updateBotError = "Bot name is required.";
+			return;
+		}
+		updatingBot = true;
+		updateBotError = null;
+		try {
+			const token = await authState.user?.getIdToken();
+			if (!token) throw new Error("No authorization token available.");
+
+			const backendUrl = env.PUBLIC_BACKEND_URL;
+			if (!backendUrl) throw new Error("Backend URL (PUBLIC_BACKEND_URL) is not set in environment.");
+
+			const response = await fetch(`${backendUrl}/bot/update`, {
+				method: "PATCH",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({
+					id: activeConfigureBot.id,
+					name: editBotName,
+					description: editBotDescription || undefined,
+					systemPrompt: editBotSystemPrompt || undefined,
+				}),
+			});
+
+			if (!response.ok) {
+				const errText = await response.text();
+				throw new Error(errText || `Failed to update bot: ${response.status}`);
+			}
+
+			const resData = await response.json();
+			if (resData.success) {
+				updateBotSuccess = true;
+				// refresh bots list and active bot
+				await fetchBots();
+				const refreshed = bots.find((b) => b.id === activeConfigureBot?.id);
+				if (refreshed) activeConfigureBot = refreshed;
+				setTimeout(() => (updateBotSuccess = false), 3000);
+			} else {
+				throw new Error(resData.message || "Failed to update bot.");
+			}
+		} catch (err: any) {
+			console.error("Error updating bot:", err);
+			updateBotError = err.message || "Failed to update bot.";
+		} finally {
+			updatingBot = false;
 		}
 	}
 
@@ -674,6 +735,10 @@
 										<button
 											onclick={() => {
 												activeConfigureBot = bot;
+												// Prefill edit fields
+												editBotName = bot.name || '';
+												editBotDescription = bot.description || '';
+												editBotSystemPrompt = bot.systemPrompt || '';
 												showConfigureModal = true;
 												memoryError = null;
 												memorySuccess = false;
@@ -919,72 +984,54 @@
 						</div>
 					</div>
 
-					<!-- Form -->
-					<form onsubmit={handleAddMemory} class="flex flex-col p-6 gap-5">
-						<!-- Success banner -->
-						{#if memorySuccess}
-							<div class="flex items-center gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200/60 text-emerald-800 rounded-xl text-xs">
+					<!-- Bot Settings: update name/description/system prompt -->
+					<div class="px-6 pt-4 pb-0 border-t border-gray-100">
+						{#if updateBotSuccess}
+							<div class="flex items-center gap-3 px-4 py-3 bg-emerald-50 border border-emerald-200/60 text-emerald-800 rounded-xl text-xs mb-3">
 								<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
 								</svg>
-								<span class="font-medium">Memory saved successfully! The bot has learned this information.</span>
+								<span class="font-medium">Bot updated successfully.</span>
 							</div>
 						{/if}
-
-						<!-- Error banner -->
-						{#if memoryError}
-							<div class="flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200/50 text-red-800 rounded-xl text-xs">
+						{#if updateBotError}
+							<div class="flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200/50 text-red-800 rounded-xl text-xs mb-3">
 								<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
 								</svg>
-								<span class="font-medium">{memoryError}</span>
+								<span class="font-medium">{updateBotError}</span>
 							</div>
 						{/if}
 
-						<div class="flex flex-col gap-2">
-							<label for="memory-text" class="text-xs font-bold text-gray-700 uppercase tracking-wider">
-								Memory Text <span class="text-red-500">*</span>
-							</label>
-							<textarea
-								id="memory-text"
-								rows="5"
-								placeholder="e.g. Yasar's best friends are Shibin, Hari, and Akash. He lives in Kerala."
-								bind:value={newMemoryText}
-								disabled={addingMemory}
-								class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm transition-all outline-none focus:border-emerald-500 focus:ring-3 focus:ring-emerald-500/10 disabled:bg-gray-50 disabled:cursor-not-allowed resize-none leading-relaxed"
-							></textarea>
-							<p class="text-[10px] text-gray-400 leading-relaxed">
-								Write a fact, paragraph, or piece of context you want this bot to remember. You can add multiple memories one at a time.
-							</p>
+						<div class="flex flex-col gap-3">
+							<div class="flex flex-col gap-2">
+								<label class="text-xs font-bold text-gray-700 uppercase tracking-wider">Bot Name <span class="text-red-500">*</span></label>
+								<input type="text" bind:value={editBotName} class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-emerald-500" />
+							</div>
+							<div class="flex flex-col gap-2">
+								<label class="text-xs font-bold text-gray-700 uppercase tracking-wider">Description</label>
+								<textarea rows="2" bind:value={editBotDescription} class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-emerald-500 resize-none"></textarea>
+							</div>
+							<div class="flex flex-col gap-2">
+								<label class="text-xs font-bold text-gray-700 uppercase tracking-wider">System Prompt</label>
+								<textarea rows="3" bind:value={editBotSystemPrompt} class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-mono outline-none focus:border-emerald-500 resize-y"></textarea>
+								<p class="text-[10px] text-gray-400">This configures the AI assistant's behavior and personality.</p>
+							</div>
+							<div class="flex items-center justify-end gap-3">
+								<button type="button" onclick={() => { /* reset edits */ editBotName = activeConfigureBot.name; editBotDescription = activeConfigureBot.description || ''; editBotSystemPrompt = activeConfigureBot.systemPrompt || ''; }} class="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 bg-white hover:bg-gray-50">Reset</button>
+								<button type="button" onclick={handleUpdateBot} disabled={updatingBot} class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-semibold hover:opacity-95 disabled:opacity-60">
+									{#if updatingBot}
+										<span class="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+										Saving...
+									{:else}
+										Save Changes
+									{/if}
+								</button>
+							</div>
 						</div>
+					</div>
 
-						<!-- Footer actions -->
-						<div class="flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
-							<button
-								type="button"
-								onclick={() => { showConfigureModal = false; activeConfigureBot = null; }}
-								disabled={addingMemory}
-								class="px-5 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 bg-white hover:bg-gray-50 hover:text-gray-900 transition-all cursor-pointer disabled:opacity-50"
-							>
-								Close
-							</button>
-							<button
-								type="submit"
-								disabled={addingMemory}
-								class="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-xl font-semibold text-sm transition-all shadow-sm hover:shadow-lg hover:shadow-emerald-500/20 active:translate-y-0.5 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
-							>
-								{#if addingMemory}
-									<span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-									Saving...
-								{:else}
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-									</svg>
-									Save Memory
-								{/if}
-							</button>
-						</div>
-					</form>
+					<!-- Memory creation moved to Chat screen panel. Use the Memory panel on the Chat page to add new memories. -->
 				</div>
 			</div>
 		{/if}
