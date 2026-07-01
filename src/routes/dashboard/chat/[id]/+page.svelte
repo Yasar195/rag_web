@@ -64,6 +64,11 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 		timestamp: Date;
 	}
 
+	interface LLMMessage {
+		role: "system" | "user" | "assistant";
+		content: string;
+	}
+
 	const botId = $page.params.id;
 
 	let bot = $state<Bot | null>(null);
@@ -88,9 +93,30 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 	let addingMemory = $state(false);
 	let memorySuccess = $state(false);
 
+	interface Connector {
+		id: string;
+		url: string;
+		lastUpdated: string;
+		botId: string;
+	}
+
+	// Connector panel state
+	let connectors = $state<Connector[]>([]);
+	let loadingConnectors = $state(false);
+	let errorConnectors = $state<string | null>(null);
+	let showConnectorsPanel = $state(false);
+
+	// Add connector states
+	let newConnectorUrl = $state("");
+	let addingConnector = $state(false);
+	let connectorSuccess = $state(false);
+	let refreshingConnectors = $state<Record<string, boolean>>({});
+
+
 	onMount(() => {
 		try {
-			showMemoryPanel = window.innerWidth >= 768; // show on md+ by default
+			showMemoryPanel = window.innerWidth >= 1024;
+			showConnectorsPanel = window.innerWidth >= 1024;
 		} catch (e) {
 			// noop on SSR
 		}
@@ -103,11 +129,12 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 		}
 	});
 
-	// Fetch bot information & memory
+	// Fetch bot information, memory & connectors
 	$effect(() => {
 		if (!authState.loading && authState.user) {
 			fetchBotDetails();
 			fetchMemory();
+			fetchConnectors();
 		}
 	});
 
@@ -197,10 +224,129 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 		}
 	}
 
+	async function fetchConnectors() {
+		loadingConnectors = true;
+		errorConnectors = null;
+		try {
+			const token = await authState.user?.getIdToken();
+			if (!token) throw new Error("No authorization token available.");
+			const backendUrl = env.PUBLIC_BACKEND_URL;
+			if (!backendUrl) throw new Error("Backend URL is not set.");
+
+			const response = await fetch(`${backendUrl}/bot/${botId}/connectors/get`, {
+				headers: { Authorization: `Bearer ${token}` }
+			});
+
+			if (!response.ok) {
+				const errText = await response.text();
+				throw new Error(errText || `Failed to fetch connectors: ${response.status}`);
+			}
+
+			const resData = await response.json();
+			if (resData.success) {
+				connectors = resData.data?.connectors || [];
+			} else {
+				throw new Error(resData.message || "Failed to load connectors.");
+			}
+		} catch (err: any) {
+			console.error("Error fetching connectors:", err);
+			errorConnectors = err.message || "Could not load connectors.";
+		} finally {
+			loadingConnectors = false;
+		}
+	}
+
+	async function handleAddConnector(e?: SubmitEvent) {
+		if (e) e.preventDefault();
+		if (!newConnectorUrl.trim() || addingConnector) return;
+
+		addingConnector = true;
+		errorConnectors = null;
+		connectorSuccess = false;
+
+		try {
+			const token = await authState.user?.getIdToken();
+			if (!token) throw new Error("No authorization token available.");
+
+			const backendUrl = env.PUBLIC_BACKEND_URL;
+			if (!backendUrl) throw new Error("Backend URL is not set.");
+
+			const response = await fetch(`${backendUrl}/bot/connectors/create`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+				body: JSON.stringify({ botId: botId, url: newConnectorUrl })
+			});
+
+			if (!response.ok) {
+				const errText = await response.text();
+				throw new Error(errText || `Failed to add connector: ${response.status}`);
+			}
+
+			const resData = await response.json();
+			if (resData.success || response.ok) {
+				newConnectorUrl = "";
+				connectorSuccess = true;
+				// refresh list
+				await fetchConnectors();
+				setTimeout(() => (connectorSuccess = false), 3000);
+			} else {
+				throw new Error(resData.message || "Failed to save connector.");
+			}
+		} catch (err: any) {
+			console.error("Error adding connector:", err);
+			errorConnectors = err.message || "Failed to add connector. Please try again.";
+		} finally {
+			addingConnector = false;
+		}
+	}
+
+	async function handleRefreshConnector(url: string, id: string) {
+		if (refreshingConnectors[id]) return;
+		refreshingConnectors = { ...refreshingConnectors, [id]: true };
+		errorConnectors = null;
+
+		try {
+			const token = await authState.user?.getIdToken();
+			if (!token) throw new Error("No authorization token available.");
+
+			const backendUrl = env.PUBLIC_BACKEND_URL;
+			if (!backendUrl) throw new Error("Backend URL is not set.");
+
+			const response = await fetch(`${backendUrl}/bot/connectors/create`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+				body: JSON.stringify({ botId: botId, url: url })
+			});
+
+			if (!response.ok) {
+				const errText = await response.text();
+				throw new Error(errText || `Failed to refresh: ${response.status}`);
+			}
+
+			const resData = await response.json();
+			if (resData.success || response.ok) {
+				await fetchConnectors();
+			} else {
+				throw new Error(resData.message || "Failed to refresh connector.");
+			}
+		} catch (err: any) {
+			console.error("Error refreshing connector:", err);
+			errorConnectors = err.message || "Failed to refresh connector.";
+		} finally {
+			refreshingConnectors = { ...refreshingConnectors, [id]: false };
+		}
+	}
+
 	async function handleSendMessage(e: SubmitEvent) {
 		e.preventDefault();
 		const trimmedMessage = inputMessage.trim();
 		if (!trimmedMessage || sendingMessage) return;
+
+		// Extract conversation history before appending the current message
+		const conversation: LLMMessage[] = messages.map(msg => ({
+			role: msg.sender === "user" ? "user" : "assistant",
+			content: msg.text
+		}));
 
 		// Append user message
 		const userMsg: Message = {
@@ -230,7 +376,8 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 					Authorization: `Bearer ${token}`
 				},
 				body: JSON.stringify({
-					message: trimmedMessage
+					message: trimmedMessage,
+					conversation: conversation
 				})
 			});
 
@@ -280,6 +427,24 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 		}
 		return "US";
 	};
+
+	function toggleMemoryPanel() {
+		showMemoryPanel = !showMemoryPanel;
+		try {
+			if (showMemoryPanel && window.innerWidth < 768) {
+				showConnectorsPanel = false;
+			}
+		} catch (e) {}
+	}
+
+	function toggleConnectorsPanel() {
+		showConnectorsPanel = !showConnectorsPanel;
+		try {
+			if (showConnectorsPanel && window.innerWidth < 768) {
+				showMemoryPanel = false;
+			}
+		} catch (e) {}
+	}
 </script>
 
 <svelte:head>
@@ -303,17 +468,6 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 						</svg>
 					</a>
 
-					<!-- Mobile: toggle memory panel -->
-					<button
-						onclick={() => showMemoryPanel = !showMemoryPanel}
-						title="Toggle memory panel"
-						class="inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-all md:hidden"
-					>
-						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-						</svg>
-					</button>
-
 					{#if bot}
 						<div class="flex items-center gap-3 min-w-0">
 							<!-- Bot Icon with premium gradient -->
@@ -331,9 +485,32 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 					{/if}
 				</div>
 
-				<!-- User Profile Info -->
+				<!-- User Profile Info & Sidebar Toggles -->
 				{#if authState.user}
 					<div class="flex items-center gap-3">
+						<!-- Toggle Memory Panel (Left) -->
+						<button
+							onclick={toggleMemoryPanel}
+							class="inline-flex items-center justify-center p-2 rounded-lg border transition-all cursor-pointer {showMemoryPanel ? 'border-emerald-200 bg-emerald-50 text-emerald-650 font-semibold' : 'border-gray-200 bg-white text-gray-500 hover:text-gray-905 hover:bg-gray-50'}"
+							title="Toggle Memory Panel"
+						>
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+							</svg>
+						</button>
+
+						<!-- Toggle Connectors Panel (Right) -->
+						<button
+							onclick={toggleConnectorsPanel}
+							class="inline-flex items-center justify-center p-2 rounded-lg border transition-all cursor-pointer {showConnectorsPanel ? 'border-blue-200 bg-blue-50 text-blue-650 font-semibold' : 'border-gray-200 bg-white text-gray-500 hover:text-gray-905 hover:bg-gray-50'}"
+							title="Toggle Connectors Panel"
+						>
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+							</svg>
+						</button>
+
+						<!-- User Profile Avatar -->
 						<div class="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 text-white flex items-center justify-center text-xs font-bold shadow-md">
 							{getInitials(authState.user.displayName, authState.user.email)}
 						</div>
@@ -626,5 +803,157 @@ async function handleAddMemoryInPanel(e?: SubmitEvent) {
 	</div>
 
 </div>
-</div>
+
+		<!-- Right Connectors Panel -->
+		{#if showConnectorsPanel}
+			<aside class="fixed inset-0 z-50 w-full md:static md:flex md:w-80 flex-shrink-0 bg-white border-l border-gray-100 flex flex-col overflow-hidden animate-fade-in" class:hidden={!showConnectorsPanel}>
+				<!-- Panel Header -->
+				<div class="px-4 py-3.5 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50/20 flex items-center justify-between">
+					<div class="flex items-center gap-2">
+						<div class="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center flex-shrink-0">
+							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+							</svg>
+						</div>
+						<span class="text-xs font-bold text-gray-700 uppercase tracking-wider">Connectors</span>
+						{#if connectors.length > 0}
+							<span class="text-[10px] font-bold bg-blue-100 text-blue-750 rounded-full px-1.5 py-0.5">{connectors.length}</span>
+						{/if}
+					</div>
+					<div class="flex items-center gap-1.5">
+						<!-- Refresh connectors -->
+						<button
+							onclick={fetchConnectors}
+							title="Refresh connectors"
+							class="p-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
+						>
+							<svg class="w-3.5 h-3.5" class:animate-spin={loadingConnectors} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+							</svg>
+						</button>
+						<!-- Close panel -->
+						<button
+							onclick={() => showConnectorsPanel = false}
+							title="Close panel"
+							class="p-1 rounded-md text-gray-400 hover:text-gray-750 hover:bg-gray-100 transition-all"
+						>
+							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
+					</div>
+				</div>
+
+				<!-- Connectors List -->
+				<div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+					{#if loadingConnectors}
+						<div class="flex flex-col gap-2 animate-pulse mt-1">
+							{#each [1,2,3] as _}
+								<div class="bg-gray-100 rounded-xl h-20"></div>
+							{/each}
+						</div>
+					{:else if errorConnectors}
+						<div class="mt-4 text-center flex flex-col items-center gap-2 px-2">
+							<svg class="w-8 h-8 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+							</svg>
+							<p class="text-xs text-red-500 font-medium">{errorConnectors}</p>
+							<button onclick={fetchConnectors} class="text-[10px] text-blue-600 hover:text-blue-800 underline cursor-pointer">Retry</button>
+						</div>
+					{:else if connectors.length === 0}
+						<div class="mt-6 text-center flex flex-col items-center gap-3 px-3">
+							<div class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-400">
+								<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+								</svg>
+							</div>
+							<p class="text-xs font-semibold text-gray-505">No documents connected yet</p>
+							<p class="text-[10px] text-gray-400 leading-relaxed">Add links to external documents, Google Sheets, Google Docs or public web pages to sync their knowledge with the bot.</p>
+						</div>
+					{:else}
+						{#each connectors as connector}
+							<div class="group relative bg-gray-50 hover:bg-blue-50/50 border border-gray-100 hover:border-blue-200/50 rounded-xl p-3 transition-all duration-200">
+								<div class="flex items-start gap-2.5">
+									<!-- Dynamic Icon depending on URL type -->
+									<div class="mt-0.5 w-6 h-6 rounded-md bg-white border border-gray-100 flex items-center justify-center text-xs flex-shrink-0 shadow-sm group-hover:border-blue-200">
+										{#if connector.url.includes("docs.google.com/spreadsheets")}
+											<span class="text-green-600 font-bold text-[10px]" title="Google Spreadsheet">田</span>
+										{:else if connector.url.includes("docs.google.com/document")}
+											<span class="text-blue-500 font-bold text-[10px]" title="Google Document">目</span>
+										{:else}
+											<span class="text-gray-400 font-bold text-[10px]" title="Web Link">🔗</span>
+										{/if}
+									</div>
+									<div class="flex-1 min-w-0">
+										<a
+											href={connector.url}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="text-xs font-medium text-gray-700 hover:text-blue-600 transition-colors break-all line-clamp-2 hover:underline cursor-pointer"
+										>
+											{connector.url}
+										</a>
+										<p class="text-[9px] text-gray-400 mt-1 font-mono">
+											Updated: {new Date(connector.lastUpdated).toLocaleDateString()} {new Date(connector.lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+										</p>
+									</div>
+
+									<!-- Refresh / Re-sync button -->
+									<button
+										onclick={() => handleRefreshConnector(connector.url, connector.id)}
+										disabled={refreshingConnectors[connector.id]}
+										class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-all flex-shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+										title="Refresh/Re-sync knowledge"
+									>
+										<svg class="w-3.5 h-3.5" class:animate-spin={refreshingConnectors[connector.id]} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+										</svg>
+									</button>
+								</div>
+							</div>
+						{/each}
+					{/if}
+				</div>
+
+				<!-- Add Connector Form -->
+				<div class="px-4 py-3 border-t border-gray-100 bg-white">
+					{#if connectorSuccess}
+						<div class="flex items-center gap-3 px-3 py-2 bg-emerald-50 border border-emerald-200/60 text-emerald-800 rounded-md text-xs mb-2 animate-pulse">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4"/></svg>
+							<span class="font-medium">Connection added.</span>
+						</div>
+					{/if}
+					{#if errorConnectors}
+						<div class="flex items-center gap-3 px-3 py-2 bg-red-50 border border-red-200/50 text-red-800 rounded-md text-xs mb-2">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/></svg>
+							<span class="font-medium">{errorConnectors}</span>
+						</div>
+					{/if}
+
+					<form onsubmit={handleAddConnector} class="flex flex-col gap-2">
+						<label class="text-xs font-bold text-gray-700 uppercase tracking-wider">Document URL <span class="text-red-500">*</span></label>
+						<input
+							type="url"
+							required
+							bind:value={newConnectorUrl}
+							placeholder="https://docs.google.com/spreadsheets/..."
+							disabled={addingConnector}
+							class="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 bg-gray-50/30"
+						/>
+						<div class="flex items-center justify-end gap-2 mt-1">
+							<button type="button" onclick={() => newConnectorUrl = ''} class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 bg-white hover:bg-gray-50">Reset</button>
+							<button type="submit" disabled={addingConnector || !newConnectorUrl.trim()} class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-60 transition-all">
+								{#if addingConnector}
+									<span class="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+									Syncing...
+								{:else}
+									Connect
+								{/if}
+							</button>
+						</div>
+					</form>
+				</div>
+			</aside>
+		{/if}
+	</div>
 </div>

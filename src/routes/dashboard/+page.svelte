@@ -498,7 +498,7 @@
 									stroke-linecap="round"
 									stroke-linejoin="round"
 									stroke-width="2"
-									d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89H18"
+									d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
 								/>
 							</svg>
 						</button>
@@ -1018,7 +1018,7 @@
 								<p class="text-[10px] text-gray-400">This configures the AI assistant's behavior and personality.</p>
 							</div>
 							<div class="flex items-center justify-end gap-3">
-								<button type="button" onclick={() => { /* reset edits */ editBotName = activeConfigureBot.name; editBotDescription = activeConfigureBot.description || ''; editBotSystemPrompt = activeConfigureBot.systemPrompt || ''; }} class="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 bg-white hover:bg-gray-50">Reset</button>
+								<button type="button" onclick={() => { if (activeConfigureBot) { editBotName = activeConfigureBot.name; editBotDescription = activeConfigureBot.description || ''; editBotSystemPrompt = activeConfigureBot.systemPrompt || ''; } }} class="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 bg-white hover:bg-gray-50">Reset</button>
 								<button type="button" onclick={handleUpdateBot} disabled={updatingBot} class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg text-sm font-semibold hover:opacity-95 disabled:opacity-60">
 									{#if updatingBot}
 										<span class="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
